@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "184855418313",
+    "project_id": "findbass-12627",
+    "storage_bucket": "findbass-12627.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:184855418313:android:3366c07305f6d15adb0418",
+        "android_client_info": {
+          "package_name": "com.gobaas.baas"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAEEC2FHfUE7iM6NNeEiVtsOgjV0T_NI38"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:184855418313:android:2a3ef93563fbf110db0418",
+        "android_client_info": {
+          "package_name": "com.gobaas.mybaas"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAEEC2FHfUE7iM6NNeEiVtsOgjV0T_NI38"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
