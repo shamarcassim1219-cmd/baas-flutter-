@@ -1,0 +1,133 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Generate missing Android platform files
+        run: |
+          mkdir -p /tmp/scaffold
+          cd /tmp/scaffold
+          flutter create --platforms=android --org com.gobaas --project-name baas .
+          cp -rn /tmp/scaffold/android "$GITHUB_WORKSPACE/android"
+
+      - name: Add required Android permissions
+        run: |
+          MANIFEST="$GITHUB_WORKSPACE/android/app/src/main/AndroidManifest.xml"
+          # Location permissions (geolocator), camera (verification
+          # photo capture) - flutter create's default manifest does
+          # not include these.
+          sed -i 's#<manifest xmlns:android="http://schemas.android.com/apk/res/android">#<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.CAMERA" />#' "$MANIFEST"
+          cat "$MANIFEST"
+
+      - name: Wire up Firebase Cloud Messaging (push notifications)
+        run: |
+          # google-services.json lives at the repo root (added via the
+          # GitHub web UI) since android/ itself is scaffolded fresh
+          # every build and never committed.
+          cp "$GITHUB_WORKSPACE/google-services.json" "$GITHUB_WORKSPACE/android/app/google-services.json"
+
+          # Recent Flutter versions scaffold Kotlin DSL (.gradle.kts)
+          # instead of Groovy (.gradle) - detect whichever flutter
+          # create actually generated rather than assuming one.
+          if [ -f "$GITHUB_WORKSPACE/android/settings.gradle.kts" ]; then
+            SETTINGS="$GITHUB_WORKSPACE/android/settings.gradle.kts"
+            APP_BUILD="$GITHUB_WORKSPACE/android/app/build.gradle.kts"
+            sed -i 's#id("dev.flutter.flutter-plugin-loader") version "1.0.0"#id("dev.flutter.flutter-plugin-loader") version "1.0.0"\n    id("com.google.gms.google-services") version "4.4.2" apply false#' "$SETTINGS"
+            sed -i 's#id("dev.flutter.flutter-gradle-plugin")#id("dev.flutter.flutter-gradle-plugin")\n    id("com.google.gms.google-services")#' "$APP_BUILD"
+          else
+            SETTINGS="$GITHUB_WORKSPACE/android/settings.gradle"
+            APP_BUILD="$GITHUB_WORKSPACE/android/app/build.gradle"
+            sed -i 's#id "dev.flutter.flutter-plugin-loader" version "1.0.0"#id "dev.flutter.flutter-plugin-loader" version "1.0.0"\n    id "com.google.gms.google-services" version "4.4.2" apply false#' "$SETTINGS"
+            sed -i 's#id "dev.flutter.flutter-gradle-plugin"#id "dev.flutter.flutter-gradle-plugin"\n    id "com.google.gms.google-services"#' "$APP_BUILD"
+          fi
+
+          cat "$SETTINGS"
+          cat "$APP_BUILD"
+
+      - name: Bump compileSdk for plugins that need Android 36+
+        run: |
+          # Several plugins (geolocator_android, image_picker_android,
+          # webview_flutter_android, shared_preferences_android...)
+          # require compiling against API 36 - fixes a build failure,
+          # not a runtime behavior change (targetSdk, which does
+          # affect runtime behavior, is left alone).
+          if [ -f "$GITHUB_WORKSPACE/android/app/build.gradle.kts" ]; then
+            APP_BUILD="$GITHUB_WORKSPACE/android/app/build.gradle.kts"
+            ROOT_BUILD="$GITHUB_WORKSPACE/android/build.gradle.kts"
+          else
+            APP_BUILD="$GITHUB_WORKSPACE/android/app/build.gradle"
+            ROOT_BUILD="$GITHUB_WORKSPACE/android/build.gradle"
+          fi
+          sed -i 's/flutter\.compileSdkVersion/36/' "$APP_BUILD"
+
+          # The app module alone isn't enough - a plugin's own Android
+          # implementation (e.g. geocoding_android) ships with its own
+          # fixed compileSdk baked into its published build.gradle,
+          # which this project's app-level setting can't override.
+          # This block forces EVERY subproject (every plugin module,
+          # not just :app) to compile against the same SDK level,
+          # which is the standard fix for "plugin X requires a higher
+          # compileSdk than :app" errors.
+          if [ -f "$GITHUB_WORKSPACE/android/build.gradle.kts" ]; then
+            {
+              echo 'subprojects {'
+              echo '    plugins.withId("com.android.application") {'
+              echo '        extensions.findByName("android")?.withGroovyBuilder {'
+              echo '            setProperty("compileSdkVersion", 36)'
+              echo '        }'
+              echo '    }'
+              echo '    plugins.withId("com.android.library") {'
+              echo '        extensions.findByName("android")?.withGroovyBuilder {'
+              echo '            setProperty("compileSdkVersion", 36)'
+              echo '        }'
+              echo '    }'
+              echo '}'
+            } >> "$ROOT_BUILD"
+          else
+            {
+              echo 'subprojects {'
+              echo "    plugins.withId('com.android.application') {"
+              echo '        android {'
+              echo '            compileSdkVersion 36'
+              echo '        }'
+              echo '    }'
+              echo "    plugins.withId('com.android.library') {"
+              echo '        android {'
+              echo '            compileSdkVersion 36'
+              echo '        }'
+              echo '    }'
+              echo '}'
+            } >> "$ROOT_BUILD"
+          fi
+
+          cat "$APP_BUILD"
+          cat "$ROOT_BUILD"
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: baas-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
